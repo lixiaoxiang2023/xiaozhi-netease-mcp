@@ -1,0 +1,57 @@
+name: probe
+
+# 诊断用：在 GitHub 的境外 runner 上把 NeteaseCloudMusicApi 完整跑一遍，
+# 验证「境外机房 IP 能不能搜到歌、能不能拿到播放地址」。
+# 跑法：Actions → probe → Run workflow，然后看日志。
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: probe netease from this runner
+        run: |
+          set +e
+          echo "===== 1. 出口 IP ====="
+          curl -s --max-time 15 https://api.ipify.org; echo
+          curl -s --max-time 15 "https://ipinfo.io/json" | head -c 400; echo
+
+          echo
+          echo "===== 2. 装 NeteaseCloudMusicApi ====="
+          npm init -y >/dev/null 2>&1
+          npm i NeteaseCloudMusicApi@4.34.1 ws@8 --no-audit --no-fund 2>&1 | tail -3
+
+          echo
+          echo "===== 3. 启动 API（复刻容器里的启动方式）====="
+          cd node_modules/NeteaseCloudMusicApi
+          PORT=3377 node app.js > /tmp/api.log 2>&1 &
+          APIPID=$!
+          for i in $(seq 1 45); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:3377/search/hot)
+            [ "$code" = "200" ] && { echo "API 就绪（等待 ${i}s）"; break; }
+            sleep 1
+          done
+          echo "--- api.log ---"
+          tail -25 /tmp/api.log
+          kill -0 $APIPID 2>/dev/null && echo "进程存活" || echo "进程已退出（generateConfig 失败？）"
+
+          echo
+          echo "===== 4. 搜索 cloudsearch ====="
+          curl -s --max-time 20 "http://127.0.0.1:3377/cloudsearch?keywords=%E6%99%B4%E5%A4%A9&limit=3&type=1" | head -c 700
+          echo
+
+          echo "===== 5. 取播放地址 song/url（关键）====="
+          curl -s --max-time 20 "http://127.0.0.1:3377/song/url?id=186016&br=128000" | head -c 900
+          echo
+          echo "===== 6. 换一首免费歌再试（id=347230 老歌）====="
+          curl -s --max-time 20 "http://127.0.0.1:3377/song/url?id=347230&br=128000" | head -c 600
+          echo
+
+          echo
+          echo "===== 7. 直连网易云域名是否可达 ====="
+          curl -s -o /dev/null -w "music.163.com      HTTP %{http_code}  %{time_total}s\n" --max-time 20 https://music.163.com/
+          curl -s -o /dev/null -w "interface.music.163 HTTP %{http_code}  %{time_total}s\n" --max-time 20 https://interface.music.163.com/
+          exit 0
