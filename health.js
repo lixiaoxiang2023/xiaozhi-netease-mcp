@@ -8,7 +8,7 @@
 const http = require('http');
 const fs = require('fs');
 
-const BUILD = 'v7-logs'; // 换版本时改这里，用来确认 Render 到底部署了哪一版
+const BUILD = 'v8-trace'; // 换版本时改这里，用来确认 Render 到底部署了哪一版
 const port = Number(process.env.PORT || 10000);
 const startedAt = Date.now();
 const STATUS_FILE = process.env.BRIDGE_STATUS_FILE || '/tmp/bridge-status.json';

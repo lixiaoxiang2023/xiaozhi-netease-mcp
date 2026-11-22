@@ -600,8 +600,12 @@ async function searchSongs(args) {
 
 // 一步到位：搜索并解析出一首可播放歌曲，减少一次用户选择与一次长文本播报。
 async function playSong(args) {
-  const rawKeywords = String(args.keywords || '').trim();
-  const artist = String(args.artist || '').trim();
+  // 模型偶尔会把参数名写成 song / name / query（schema 写的是 keywords），
+  // 这里全部兼容，避免因为一个键名对不上就整个失败。
+  const rawKeywords = String(
+    args.keywords || args.song || args.name || args.query || args.keyword || args.title || '',
+  ).trim();
+  const artist = String(args.artist || args.singer || args.author || '').trim();
   const keywords = artist && !rawKeywords.includes(artist)
     ? `${artist} ${rawKeywords}` : rawKeywords;
   if (!keywords) throw new Error('请提供 keywords（歌曲名、歌手或关键词）');
@@ -785,11 +789,18 @@ async function handleMessage(ws, raw) {
       case 'tools/call': {
         const name = msg.params && msg.params.name;
         const args = (msg.params && msg.params.arguments) || {};
+        // 关键排查点：平台到底把哪个工具名发过来了（比如误调设备的
+        // self.music.play_song 就会落到「未知工具」）
+        log(`[tool] ${name} 参数=${JSON.stringify(args).slice(0, 160)}`);
         let text;
         if (name === 'play_song') text = await playSong(args);
         else if (name === 'search_songs') text = await searchSongs(args);
         else if (name === 'music_chart') text = await musicChart(args);
-        else throw new Error(`未知工具: ${name}`);
+        else {
+          log(`[tool] 未知工具名: ${name}`);
+          throw new Error(`未知工具: ${name}`);
+        }
+        log(`[tool] ${name} 返回: ${String(text).slice(0, 200)}`);
         send(ws, ok(id, { content: [{ type: 'text', text }], isError: false }));
         break;
       }
