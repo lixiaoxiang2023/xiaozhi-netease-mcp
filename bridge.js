@@ -586,7 +586,9 @@ async function playSong(args) {
   const keywords = artist && !rawKeywords.includes(artist)
     ? `${artist} ${rawKeywords}` : rawKeywords;
   if (!keywords) throw new Error('请提供 keywords（歌曲名、歌手或关键词）');
-  const songs = await searchSongsRaw(keywords, 3);
+  // 取 10 首而不是 3 首：无登录态时版权差异极大，前几首常常整批 404，
+  // 多几个候选能明显提高“总能找到一首能放”的概率（实测晴天前 3 首全 null）
+  const songs = await searchSongsRaw(keywords, 10);
   if (!songs.length) return `没有找到与「${keywords}」相关的歌曲。`;
 
   // 先并行确认候选曲目的可播放性，再挑一首最合适的：
@@ -596,9 +598,22 @@ async function playSong(args) {
   })));
   const playable = candidates.filter(c => c.info.url);
   if (!playable.length) {
-    return `找到与「${keywords}」相关的歌曲，但官方接口未返回可播放地址（可能受会员/版权限制），本工具不绕过。`;
+    const names = songs.slice(0, 3).map(s => normalizeSong(s).name).join('、');
+    return `「${keywords}」搜到 ${songs.length} 首（${names} 等），但都没有可播放地址：` +
+      '原唱多需黑胶会员，未登录时官方接口会直接返回空（试听片段也不给）。' +
+      '可以换个歌手版本重试，或让管理员填 NETEASE_COOKIE 解锁完整版。';
   }
-  const chosen = playable.find(c => !c.info.trial) || playable[0];
+  // 候选多了以后不能盲取第一首，否则「晴天」会放成某个翻唱：
+  // 完整曲目 +10，歌名/歌手命中关键词每项 +3
+  const tokens = keywords.toLowerCase().split(/\s+/).filter(Boolean);
+  const scored = playable.map((c) => {
+    const n = normalizeSong(c.song);
+    const hay = `${n.name || ''} ${n.artists || ''}`.toLowerCase();
+    const hit = tokens.filter((t) => hay.includes(t)).length;
+    return { c, s: (c.info.trial ? 0 : 10) + hit * 3 };
+  });
+  scored.sort((a, b) => b.s - a.s);
+  const chosen = scored[0].c;
 
   {
     const s = chosen.song;
