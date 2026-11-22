@@ -1,37 +1,44 @@
 name: keepalive
 
 # Render 免费层：15 分钟没有入站请求就休眠，休眠后 MCP 接入点断开，
-# 对设备说"放歌"会失败。这个工作流定时敲 /health，让容器一直醒着。
+# 对设备说“放歌”会直接失败。这个工作流定时敲 /health，让容器一直醒着。
 #
-# 为什么不只用 cron-job.org：那需要额外注册账号；这里用你的 GitHub 账号即可，
+# 设计要点：每次运行不止敲一下就退，而是连敲 3 次、间隔 5 分钟，
+# 单次运行覆盖约 10 分钟。这样即使 GitHub 的 cron 被延迟几分钟，
+# 相邻两次运行的覆盖区间仍能首尾相接，不会出现 >15 分钟的空档。
+#
+# 为什么不只用 cron-job.org：那要额外注册账号；这里用现成的 GitHub 账号即可，
 # 仓库是 public，Actions 分钟数不计费。
 
 on:
   schedule:
-    # 每 10 分钟一次；Render 的休眠阈值是 15 分钟，留 5 分钟余量抵 cron 延迟
     - cron: "*/10 * * * *"
   workflow_dispatch:
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
 
 jobs:
   ping:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Ping health endpoint
+      - name: Keep Render awake
         env:
-          # 在仓库 Settings → Secrets and variables → Actions → Variables
-          # 里加一个 HEALTH_URL，指向你的 Render 服务
+          # 仓库 Settings → Secrets and variables → Actions → Variables
+          # 加一个 HEALTH_URL 可覆盖默认地址
           HEALTH_URL: ${{ vars.HEALTH_URL || 'https://xiaozhi-netease-mcp.onrender.com/health' }}
         run: |
           set -u
           echo "target: $HEALTH_URL"
-          # 打两次、间隔 4 分钟：即使 cron 被 GitHub 延迟，首次 ping 失败后的
-          # 第二次仍可能落在休眠阈值内，冷启动期间也更容易被打中
-          for i in 1 2; do
-            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 "$HEALTH_URL" || echo 000)
-            echo "attempt $i -> HTTP $code"
-            [ "$code" = "200" ] && exit 0
-            [ "$i" = "1" ] && sleep 240
+          ok=0
+          for i in 1 2 3; do
+            code=$(curl -s -o /tmp/h.json -w '%{http_code}' --max-time 60 "$HEALTH_URL" || echo 000)
+            echo "$(date -u +%H:%M:%S) ping $i -> HTTP $code"
+            [ "$code" = "200" ] && ok=$((ok+1))
+            [ "$i" -lt 3 ] && sleep 300
           done
-          echo "health check failed twice (Render 可能正在冷启动，下次 cron 会继续)"
+          echo "success pings: $ok/3"
+          # 失败也不标红：每天几十次运行，标红会变成邮件轰炸；看上面的计数即可
           exit 0
