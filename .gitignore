@@ -1,0 +1,12 @@
+node_modules/
+tools/
+*.png
+*.bak-*
+
+# 本地私有配置与临时数据，绝不入库
+config.json
+endpoint*.txt
+*.log
+
+!package.json
+!package-lock.json

@@ -1,0 +1,23 @@
+# Render Blueprint：把整套服务作为一个免费 Web Service 部署。
+# 免费层额度是「每个服务 750 小时/月」，所以必须让 API 和 bridge 共用一个容器，
+# 拆成两个服务会各占 730 小时、直接超额。
+services:
+  - type: web
+    name: xiaozhi-netease-mcp
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # 设备直连网易云 CDN：不需要 ffmpeg、不需要对外媒体端口
+      - key: NCM_STREAM_MODE
+        value: direct
+      - key: NCM_PLAY_BITRATE
+        value: "128000"
+      # 下面两项在 Render 控制台手填，不要写进仓库
+      - key: XIAOZHI_MCP_ENDPOINTS
+        sync: false
+      - key: NETEASE_COOKIE
+        sync: false

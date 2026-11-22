@@ -1,0 +1,17 @@
+{
+  "name": "xiaozhi-netease-mcp",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "leveldown": "^6.1.1",
+    "NeteaseCloudMusicApi": "^4.34.1",
+    "ws": "^8.23.0"
+  }
+}
