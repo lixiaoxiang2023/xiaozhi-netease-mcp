@@ -8,7 +8,7 @@
 const http = require('http');
 const fs = require('fs');
 
-const BUILD = 'v5-cookie'; // 换版本时改这里，用来确认 Render 到底部署了哪一版
+const BUILD = 'v6-keepalive'; // 换版本时改这里，用来确认 Render 到底部署了哪一版
 const port = Number(process.env.PORT || 10000);
 const startedAt = Date.now();
 const STATUS_FILE = process.env.BRIDGE_STATUS_FILE || '/tmp/bridge-status.json';
@@ -149,4 +149,35 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(port, '0.0.0.0', () => {
   console.log(`[health] listening on 0.0.0.0:${port}, build=${BUILD}, endpoints=${endpoints.length}`);
+  startSelfPing();
 });
+
+// ==== 自保活 ====
+// Render 免费实例 15 分钟没有「入站请求」就休眠，休眠后 bridge 的 WebSocket 断开，
+// 平台侧这个智能体等于没有音乐工具，设备只会回「找不到歌」。
+// GitHub Actions 的 cron 实测漂移严重（有过整小时不触发），所以这里让容器自己
+// 定时请求自己的公网 /health —— 请求经 Render 路由进来，同样算入站流量。
+function startSelfPing() {
+  const base = (process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_URL || '').trim();
+  if (!base) {
+    console.log('[keepalive] 未提供 RENDER_EXTERNAL_URL，跳过自保活');
+    return;
+  }
+  const period = Number(process.env.SELF_PING_MS) > 30000 ? Number(process.env.SELF_PING_MS) : 5 * 60 * 1000;
+  const target = `${base.replace(/\/+$/, '')}/health?self=1`;
+  let fails = 0;
+  console.log(`[keepalive] 每 ${Math.round(period / 1000)}s 自检 ${target}`);
+  const tick = async () => {
+    try {
+      const res = await fetch(target, { signal: AbortSignal.timeout(20000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (fails) console.log('[keepalive] 恢复正常');
+      fails = 0;
+    } catch (e) {
+      fails += 1;
+      if (fails === 1 || fails % 6 === 0) console.log(`[keepalive] 自检失败 ${fails} 次: ${e && e.message}`);
+    }
+  };
+  setInterval(tick, period).unref();
+  setTimeout(tick, 30 * 1000).unref();
+}
