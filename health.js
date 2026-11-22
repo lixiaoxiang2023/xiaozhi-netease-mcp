@@ -8,7 +8,7 @@
 const http = require('http');
 const fs = require('fs');
 
-const BUILD = 'v4-vip'; // 换版本时改这里，用来确认 Render 到底部署了哪一版
+const BUILD = 'v5-cookie'; // 换版本时改这里，用来确认 Render 到底部署了哪一版
 const port = Number(process.env.PORT || 10000);
 const startedAt = Date.now();
 const STATUS_FILE = process.env.BRIDGE_STATUS_FILE || '/tmp/bridge-status.json';
@@ -27,6 +27,9 @@ function readBridgeStatus() {
 }
 
 // 容器内部请求本地网易云 API；超时/连接拒绝要能区分开
+// 环境变量名兼容：部署面板用的是 NETEASE_COOKIE，早期代码用的是 NCM_COOKIE。
+const COOKIE = (process.env.NETEASE_COOKIE || process.env.NCM_COOKIE || '').trim();
+
 function apiGet(pathname, params, timeoutMs = 15000) {
   const url = new URL(pathname, API_BASE);
   for (const [k, v] of Object.entries(params || {})) url.searchParams.set(k, String(v));
@@ -35,7 +38,7 @@ function apiGet(pathname, params, timeoutMs = 15000) {
       timeout: timeoutMs,
       headers: {
         Accept: 'application/json',
-        ...(process.env.NETEASE_COOKIE ? { Cookie: process.env.NETEASE_COOKIE } : {}),
+        ...(COOKIE ? { Cookie: COOKIE } : {}),
       },
     }, (res) => {
       let raw = '';
@@ -53,7 +56,7 @@ function apiGet(pathname, params, timeoutMs = 15000) {
 }
 
 async function runDiag(keywords) {
-  const out = { build: BUILD, api_base: API_BASE, keywords, cookie: Boolean(process.env.NETEASE_COOKIE) };
+  const out = { build: BUILD, api_base: API_BASE, keywords, cookie: Boolean(COOKIE) };
 
   // 1. API 有没有活着
   const ping = await apiGet('/search/hot', {}, 10000);

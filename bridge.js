@@ -17,7 +17,10 @@ const PRIVATE_DIR = path.join(os.homedir(), '.config', 'xiaozhi-netease-mcp');
 // （响应里带 freeTrialInfo，end=30），听感就是"播了几句就没了"。
 // 把浏览器登录后的 cookie（关键字段 MUSIC_U）写进私有 config.json 的
 // netease_cookie，或用环境变量 NCM_COOKIE 传入，即可拿到完整音源。
-const NCM_COOKIE = String(resolveSetting('netease_cookie', 'NCM_COOKIE', '') || '');
+// 同时兼容 NCM_COOKIE / NETEASE_COOKIE 两个环境变量名（部署面板填的是后者），
+// 以及 config.json 里的 netease_cookie / cookie 两个键名。
+const NCM_COOKIE = String(resolveSetting(['netease_cookie', 'cookie'],
+  ['NCM_COOKIE', 'NETEASE_COOKIE'], '') || '');
 // 支持多个智能体：默认读取 endpoint.txt，可选再读取 endpoint_*.txt。
 const EXTRA_ENDPOINT_FILES = ['endpoint_axi.txt'];
 const PROTOCOL_VERSION = '2024-11-05';
@@ -139,12 +142,18 @@ function cached(key, ttlMs, loader) {
 
 // 配置优先级：环境变量 > 私有 config.json > 内置默认值。
 // 私有配置放在仓库外的 PRIVATE_DIR，便于持久化且不会被提交。
-function resolveSetting(configKey, envName, fallback) {
-  const envVal = process.env[envName];
-  if (envVal !== undefined && String(envVal).trim() !== '') return String(envVal).trim();
+function resolveSetting(configKeys, envNames, fallback) {
+  const keys = Array.isArray(configKeys) ? configKeys : [configKeys];
+  const envs = Array.isArray(envNames) ? envNames : [envNames];
+  for (const envName of envs) {
+    const envVal = process.env[envName];
+    if (envVal !== undefined && String(envVal).trim() !== '') return String(envVal).trim();
+  }
   try {
     const cfg = JSON.parse(fs.readFileSync(path.join(PRIVATE_DIR, 'config.json'), 'utf8'));
-    if (cfg && cfg[configKey] !== undefined && cfg[configKey] !== null) return cfg[configKey];
+    for (const k of keys) {
+      if (cfg && cfg[k] !== undefined && cfg[k] !== null && String(cfg[k]).trim() !== '') return cfg[k];
+    }
   } catch { /* 未配置则用默认值 */ }
   return fallback;
 }
