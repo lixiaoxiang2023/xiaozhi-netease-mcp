@@ -805,7 +805,8 @@ async function handleMessage(ws, raw) {
         break;
       }
       case 'ping':
-        send(ws, ok(id, {}));
+        // 有 id 才是请求，必须回；没有 id 是通知，回了反而会被判协议错误
+        if (id !== undefined && id !== null) send(ws, ok(id, {}));
         break;
       case 'resources/list':
         send(ws, ok(id, { resources: [] }));
@@ -841,6 +842,15 @@ function connect(endpoint, label) {
     state.delay = 1000;
     log(`[${label}] MCP 接入点已连接`);
     publishStatus(label, { state: 'connected', lastError: null });
+    // 平台侧会周期性断开「看起来空闲」的长连接（实测约 100 秒一次），
+    // 断线瞬间说话就会「找不到歌」。客户端主动每 25 秒打一次 WS 心跳，
+    // 让链路上始终有双向流量。
+    clearInterval(state.keep);
+    state.keep = setInterval(() => {
+      try {
+        if (ws.readyState === WebSocket.OPEN) ws.ping();
+      } catch { /* ignore */ }
+    }, 25000);
   });
   ws.on('message', (data) => { handleMessage(ws, data).catch(e => log(`[${label}] 处理消息异常:`, redactError(e))); });
   // 握手被拒时 ws 只会说 "Unexpected server response: 400"，
@@ -863,10 +873,14 @@ function connect(endpoint, label) {
     log(`[${label}] 接入点连接错误:`, msg);
     publishStatus(label, { state: 'error', lastError: msg });
   });
-  ws.on('close', () => {
+  ws.on('close', (code, reason) => {
     if (state.ws === ws) state.ws = null;
+    clearInterval(state.keep);
     if (stopped) return;
-    log(`[${label}] 接入点断开，将在退避后重连`);
+    // 关闭码是判断「谁断的」的关键：1000/1005 多为对端正常关闭，
+    // 1006 是异常中断（Render 代理掐断 / 网络抖动）。
+    const why = reason && reason.length ? ` ${String(reason).slice(0, 80)}` : '';
+    log(`[${label}] 接入点断开 code=${code}${why}，将在退避后重连`);
     clearTimeout(state.timer);
     state.timer = setTimeout(() => connect(endpoint, label), state.delay);
     state.delay = Math.min(state.delay * 2, 60000);
