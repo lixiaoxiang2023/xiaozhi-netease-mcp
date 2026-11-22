@@ -1,44 +1,49 @@
 name: keepalive
 
-# Render 免费层：15 分钟没有入站请求就休眠，休眠后 MCP 接入点断开，
-# 对设备说“放歌”会直接失败。这个工作流定时敲 /health，让容器一直醒着。
+# Render 免费层：15 分钟没有入站请求就休眠。休眠后 bridge 的 WebSocket 断开，
+# 平台侧就看不到任何工具，对设备说“放歌”只会得到“找不到歌”。
 #
-# 设计要点：每次运行不止敲一下就退，而是连敲 3 次、间隔 5 分钟，
-# 单次运行覆盖约 10 分钟。这样即使 GitHub 的 cron 被延迟几分钟，
-# 相邻两次运行的覆盖区间仍能首尾相接，不会出现 >15 分钟的空档。
-#
-# 为什么不只用 cron-job.org：那要额外注册账号；这里用现成的 GitHub 账号即可，
-# 仓库是 public，Actions 分钟数不计费。
+# 两种用法：
+#   1. 定时（*/10）：每次跑约 10 分钟、每 5 分钟敲一次，覆盖区间首尾相接
+#   2. 手动 dispatch 并填 minutes：让容器常驻 N 分钟（排查/验收用，上限 300）
 
 on:
   schedule:
     - cron: "*/10 * * * *"
   workflow_dispatch:
+    inputs:
+      minutes:
+        description: "持续保活多少分钟（留空=10）"
+        required: false
+        default: "10"
 
+# 按触发方式分组，避免常驻任务把定时任务堵在队列里
 concurrency:
-  group: keepalive
+  group: keepalive-${{ github.event_name }}
   cancel-in-progress: false
 
 jobs:
   ping:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 350
     steps:
       - name: Keep Render awake
         env:
-          # 仓库 Settings → Secrets and variables → Actions → Variables
-          # 加一个 HEALTH_URL 可覆盖默认地址
           HEALTH_URL: ${{ vars.HEALTH_URL || 'https://xiaozhi-netease-mcp.onrender.com/health' }}
+          MINUTES: ${{ inputs.minutes || '10' }}
         run: |
           set -u
-          echo "target: $HEALTH_URL"
-          ok=0
-          for i in 1 2 3; do
+          echo "target: $HEALTH_URL  duration: ${MINUTES}min"
+          deadline=$(( $(date +%s) + MINUTES * 60 ))
+          n=0; ok=0; fail=0
+          while :; do
+            n=$((n + 1))
             code=$(curl -s -o /tmp/h.json -w '%{http_code}' --max-time 60 "$HEALTH_URL" || echo 000)
-            echo "$(date -u +%H:%M:%S) ping $i -> HTTP $code"
-            [ "$code" = "200" ] && ok=$((ok+1))
-            [ "$i" -lt 3 ] && sleep 300
+            if [ "$code" = "200" ]; then ok=$((ok + 1)); else fail=$((fail + 1)); fi
+            echo "$(date -u +%H:%M:%S) ping $n -> HTTP $code (ok=$ok fail=$fail)"
+            [ "$(date +%s)" -ge "$deadline" ] && break
+            sleep 300
           done
-          echo "success pings: $ok/3"
-          # 失败也不标红：每天几十次运行，标红会变成邮件轰炸；看上面的计数即可
+          echo "done: $ok ok / $fail fail over $n pings"
+          # 失败不标红：每天几十次运行，标红会变成邮件轰炸；看上面的计数即可
           exit 0
