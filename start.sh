@@ -9,9 +9,9 @@ APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 API_PORT="${API_PORT:-3377}"
 PUBLIC_PORT="${PORT:-10000}"
 
-echo "[boot] 网易云 API -> 127.0.0.1:${API_PORT}"
-cd "${APP_DIR}/node_modules/NeteaseCloudMusicApi"
-PORT="${API_PORT}" node app.js &
+echo "[boot] 网易云 API -> 127.0.0.1:${API_PORT}（只回环，不对公网暴露）"
+cd "${APP_DIR}"
+PORT="${API_PORT}" HOST=127.0.0.1 node api-launcher.js &
 API_PID=$!
 
 # 等 API 就绪，最多 30 秒；没起来也继续，bridge 会自己重试

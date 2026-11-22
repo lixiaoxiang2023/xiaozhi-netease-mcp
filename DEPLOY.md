@@ -131,7 +131,20 @@ Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
 | 现象 | 原因 |
 |---|---|
 | 日志 `没有有效的接入点地址` | `XIAOZHI_MCP_ENDPOINTS` 没填，或不是 `wss://` 开头 |
+| 日志 `握手被拒: HTTP 400` | 该接入点已被别处占用（本机 bridge 没停）或 token 失效；body 里写着原因 |
 | 日志反复 `已断开，3 秒后重连` | 接入点 token 失效，回控制台重新生成接入点 |
 | 控制台工具列表为空 | bridge 没连上；先看日志有没有 `已连接` |
 | 设备说“播放失败” | 看 bridge 日志的 `[media]` 行；`direct` 模式下应直接出现 CDN 域名 |
 | 播放只有 30 秒 | 未填 `NETEASE_COOKIE`，或账号非黑胶 VIP |
+
+**最快的排查方式**：浏览器打开 `https://<你的服务名>.onrender.com/health`，返回里 `agents` 就是每个接入点的实时状态，不用翻 Render 日志：
+
+```json
+{"bridge_running":true,"agents":{
+  "agent#1":{"state":"connected","attempts":1,"lastError":null},
+  "agent#2":{"state":"rejected","httpStatus":400,"lastError":"HTTP 400 {\"error\":...}"}}}
+```
+
+`state`：`connecting` / `connected` / `rejected`（握手被拒）/ `error`。
+
+> 网易云 API（3377）现在只绑 `127.0.0.1`，不再被 Render 记成“新增开放端口”——那句 `Detected a new open port HTTP:3377` 不会再出现。

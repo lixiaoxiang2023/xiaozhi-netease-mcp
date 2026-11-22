@@ -14,7 +14,7 @@ RUN npm install --omit=dev --no-audit --no-fund \
         ws@^8 \
         NeteaseCloudMusicApi@^4.34.1
 
-COPY bridge.js health.js start.sh ./
+COPY bridge.js health.js start.sh api-launcher.js ./
 RUN chmod +x start.sh
 
 EXPOSE 10000

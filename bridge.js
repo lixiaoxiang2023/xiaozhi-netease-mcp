@@ -178,6 +178,26 @@ function redactError(err) {
             .replace(/wss?:\/\/[^\s"'<>]+/gi, '[ENDPOINT_REDACTED]');
 }
 
+// ---- 状态外泄通道 ----
+// health.js 是独立进程，读不到 bridge 的内存。这里把每个接入点的连接状态落到
+// 临时文件，health.js 读出来塞进 /health，于是浏览器里直接能看到“云端连没连上、
+// 被拒的真实原因”，不必去翻 Render 日志。
+const STATUS_FILE = process.env.BRIDGE_STATUS_FILE || '/tmp/bridge-status.json';
+const statusMap = Object.create(null);
+function publishStatus(label, patch) {
+  const cur = statusMap[label] || (statusMap[label] = { attempts: 0 });
+  if (patch.state === 'connecting') cur.attempts = (cur.attempts || 0) + 1;
+  Object.assign(cur, patch);
+  cur.ts = new Date().toISOString();
+  try {
+    fs.writeFileSync(STATUS_FILE, JSON.stringify({
+      pid: process.pid,
+      mode: process.env.NCM_STREAM_MODE || 'direct',
+      agents: statusMap,
+    }));
+  } catch { /* 写不进去不影响播放 */ }
+}
+
 function apiGet(endpoint, params, timeoutMs = 8000) {
   const url = new URL(endpoint, API_BASE);
   for (const [k, v] of Object.entries(params || {})) url.searchParams.set(k, String(v));
@@ -769,14 +789,35 @@ function connect(endpoint, label) {
     clients.set(endpoint, state);
   }
   log(`[${label}] 正在连接小智 MCP 接入点…（地址已隐藏）`);
+  publishStatus(label, { state: 'connecting', lastError: null });
   const ws = new WebSocket(endpoint, { handshakeTimeout: 15000 });
   state.ws = ws;
   ws.on('open', () => {
     state.delay = 1000;
     log(`[${label}] MCP 接入点已连接`);
+    publishStatus(label, { state: 'connected', lastError: null });
   });
   ws.on('message', (data) => { handleMessage(ws, data).catch(e => log(`[${label}] 处理消息异常:`, redactError(e))); });
-  ws.on('error', (err) => log(`[${label}] 接入点连接错误:`, redactError(err)));
+  // 握手被拒时 ws 只会说 "Unexpected server response: 400"，
+  // 真正原因（token 失效 / 同一接入点已有连接 / 接入点未启用）在响应 body 里，必须读出来
+  ws.on('unexpected-response', (req, res) => {
+    let body = '';
+    res.setEncoding('utf8');
+    res.on('data', (c) => { if (body.length < 500) body += c; });
+    res.on('end', () => {
+      const detail = `HTTP ${res.statusCode}${body ? ' ' + body.replace(/\s+/g, ' ').slice(0, 240) : ''}`;
+      const msg = redactError(detail);
+      log(`[${label}] 握手被拒:`, msg);
+      publishStatus(label, { state: 'rejected', httpStatus: res.statusCode, lastError: msg });
+      try { ws.terminate(); } catch { /* ignore */ }
+    });
+    res.on('error', () => { try { ws.terminate(); } catch { /* ignore */ } });
+  });
+  ws.on('error', (err) => {
+    const msg = redactError(err);
+    log(`[${label}] 接入点连接错误:`, msg);
+    publishStatus(label, { state: 'error', lastError: msg });
+  });
   ws.on('close', () => {
     if (state.ws === ws) state.ws = null;
     if (stopped) return;
