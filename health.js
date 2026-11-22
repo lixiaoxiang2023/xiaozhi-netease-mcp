@@ -8,7 +8,7 @@
 const http = require('http');
 const fs = require('fs');
 
-const BUILD = 'v3-diag'; // 换版本时改这里，用来确认 Render 到底部署了哪一版
+const BUILD = 'v4-vip'; // 换版本时改这里，用来确认 Render 到底部署了哪一版
 const port = Number(process.env.PORT || 10000);
 const startedAt = Date.now();
 const STATUS_FILE = process.env.BRIDGE_STATUS_FILE || '/tmp/bridge-status.json';
@@ -95,6 +95,20 @@ async function runDiag(keywords) {
   } else {
     out.hint = '接口没给播放地址：多为地区/版权限制（境外机房 IP 常见），换地区或改用国内中转';
   }
+
+  // 4. 固定探针：十年（65538）—— 有 cookie + 黑胶 时应是完整版（free_trial 为 null），
+  //    无 cookie 则只返回 30 秒试听，两者一比就知道 NETEASE_COOKIE 到底生效没有
+  const vipId = Number(process.env.DIAG_VIP_ID || 65538);
+  const v = await apiGet('/song/url', { id: vipId, br: process.env.NCM_PLAY_BITRATE || 128000 });
+  const vi = (v.body && v.body.data && v.body.data[0]) || {};
+  out.vip_probe = {
+    id: vipId,
+    http: v.status,
+    has_link: Boolean(vi.url),
+    br: vi.br,
+    free_trial: vi.freeTrialInfo || null,
+    cannot_listen_reason: (vi.freeTrialPrivilege && vi.freeTrialPrivilege.cannotListenReason) || null,
+  };
   return out;
 }
 
