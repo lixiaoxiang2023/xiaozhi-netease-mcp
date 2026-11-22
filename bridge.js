@@ -176,8 +176,18 @@ function readEndpoints() {
   return list;
 }
 
+const LOG_FILE = process.env.BRIDGE_LOG_FILE || '/tmp/bridge.log';
+
 function log(...args) {
-  console.log(new Date().toISOString(), ...args);
+  const line = `${new Date().toISOString()} ${args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')}`;
+  console.log(line);
+  // 容器里开不了 shell：把日志落到文件，由 health.js 的 /logs 读出来，
+  // 这样线上排查不用翻 Render 控制台。超过 512KB 直接截断重来。
+  try {
+    const stat = fs.existsSync(LOG_FILE) ? fs.statSync(LOG_FILE) : null;
+    if (stat && stat.size > 512 * 1024) fs.writeFileSync(LOG_FILE, '');
+    fs.appendFileSync(LOG_FILE, line + '\n');
+  } catch { /* 写不进去不影响播放 */ }
 }
 
 function redactError(err) {

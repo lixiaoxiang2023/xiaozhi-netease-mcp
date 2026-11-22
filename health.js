@@ -8,7 +8,7 @@
 const http = require('http');
 const fs = require('fs');
 
-const BUILD = 'v6-keepalive'; // 换版本时改这里，用来确认 Render 到底部署了哪一版
+const BUILD = 'v7-logs'; // 换版本时改这里，用来确认 Render 到底部署了哪一版
 const port = Number(process.env.PORT || 10000);
 const startedAt = Date.now();
 const STATUS_FILE = process.env.BRIDGE_STATUS_FILE || '/tmp/bridge-status.json';
@@ -122,6 +122,20 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify(obj, null, 2));
   };
+
+  if (u.pathname === '/logs') {
+    const n = Math.min(Math.max(Number(u.searchParams.get('n')) || 120, 1), 500);
+    try {
+      const raw = fs.readFileSync('/tmp/bridge.log', 'utf8');
+      let lines = raw.split('\n').filter(Boolean).slice(-n);
+      // 兜底脱敏：万一有 wss 地址混进日志
+      lines = lines.map((l) => l.replace(/wss:\/\/[^\s"']+/g, 'wss://<hidden>'));
+      send({ build: BUILD, lines });
+    } catch (e) {
+      send({ build: BUILD, error: `读不到日志: ${e && e.message}`, hint: 'bridge 还没产生日志，或容器刚重启' });
+    }
+    return;
+  }
 
   if (u.pathname === '/diag') {
     try {
