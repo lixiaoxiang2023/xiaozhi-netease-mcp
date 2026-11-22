@@ -41,38 +41,55 @@
 
 不填也能用，但 VIP 曲目只有 30~45 秒试听片段。填了才有完整版。值就是 `MUSIC_U=...` 那一串。
 
-## 二、把代码推到一个 Git 仓库
+## 二、代码仓库（已完成）
 
-Render 的 Blueprint 从 Git 仓库拉代码。私有仓库也可以（首次授权 GitHub 即可）。
+代码已推到 **public** 仓库：
 
-```bash
-cd xiaozhi-netease-mcp
-git init
-git add bridge.js health.js start.sh Dockerfile render.yaml .dockerignore
-git commit -m "deploy: 云端版（direct 模式，单容器双进程）"
-git remote add origin <你的仓库地址>
-git push -u origin main
+```
+https://github.com/lixiaoxiang2023/xiaozhi-netease-mcp
 ```
 
-注意 `.dockerignore` 已排除 `node_modules`、`tools/`、`*.json`，不会把本地登录态或缓存带上去。
+选 public 的原因：Actions 分钟数不计费，保活可以直接用 GitHub 定时任务；同时 Render 可以直接用「Public Git repository」部署，**不需要授权 GitHub 账号**。仓库里没有任何凭据（`.gitignore` 已排除 `config.json`、`endpoint*.txt`、`*.log`）。
 
-## 三、在 Render 创建
+## 三、在 Render 创建（两种方式，选一种）
 
-1. 登录 render.com → **New** → **Blueprint**
-2. 选中刚推的仓库，Render 会自动读到 `render.yaml`
-3. 它会把 `XIAOZHI_MCP_ENDPOINTS` 和 `NETEASE_COOKIE` 标记为**需要手填**，逐个填上
-4. 点 **Apply**，等构建（首次约 3~5 分钟，要装 NeteaseCloudMusicApi 的依赖）
+**方式 A：Public Git repository（推荐，不授权、不装 GitHub App）**
+
+1. render.com → **New** → **Web Service**
+2. 选最下面 **Public Git repository**，填 `https://github.com/lixiaoxiang2023/xiaozhi-netease-mcp`
+3. Runtime 选 **Docker**，Region 选 **Singapore**，Plan 选 **Free**
+4. 展开 **Advanced** → **Add Environment Variable**，逐个填：
+
+| Key | Value |
+|---|---|
+| `NCM_STREAM_MODE` | `direct` |
+| `NCM_PLAY_BITRATE` | `128000` |
+| `XIAOZHI_MCP_ENDPOINTS` | 两个接入点，英文逗号拼接 |
+| `NETEASE_COOKIE` | 可留空（VIP 完整版才需要） |
+
+5. Health Check Path 填 `/health`，点 **Create Web Service**
+
+**方式 B：Blueprint（env 已预声明，但要授权一次 GitHub）**
+
+1. render.com → **New** → **Blueprint** → 选中本仓库
+2. 自动读 `render.yaml`，把标了 `sync: false` 的两项手填
+3. 点 **Apply**
+
+首次构建约 3~5 分钟（要装 NeteaseCloudMusicApi 的依赖）。
 
 ## 四、必须做的一步：保活
 
 Render 免费层**15 分钟没有入站请求就休眠**，休眠后接入点断开，你对设备说“放歌”会失败。
 
-去 [cron-job.org](https://cron-job.org)（免费）建一个任务：
+仓库里已带 `.github/workflows/keepalive.yml`，默认按 `https://xiaozhi-netease-mcp.onrender.com/health` 每 10 分钟敲一次。**域名对不上时要改**：
 
-- URL：`https://<你的服务名>.onrender.com/health`
-- 间隔：**每 10 分钟**
+1. 打开仓库 → Settings → Secrets and variables → Actions → **Variables**
+2. New repository variable：Name `HEALTH_URL`，Value `https://<你的服务名>.onrender.com/health`
+3. Actions 页面手动 Run 一次 `keepalive`，看到 `HTTP 200` 即成功
 
-这样服务不会睡。如果不想保活，就要接受“每次用之前先等一下唤醒（30~50 秒）”。
+> 服务名不是 `xiaozhi-netease-mcp` 时（重名会被加后缀），第一步就看 Render 控制台顶部的 URL。
+>
+> 更稳的替代：去 [cron-job.org](https://cron-job.org) 建任务，每 5 分钟 GET 同一个 `/health`。它有 1 分钟级精度，不受 GitHub cron 排队影响。
 
 ## 五、验证顺序
 
